@@ -34,6 +34,11 @@ test('paging through the catalog reaches every product exactly once', async () =
 		assert.ok(offset < 100, 'paging loop did not terminate');
 	}
 
+	// An empty catalog terminates this on the first page with every assertion
+	// trivially true — 0 === 0 above, and an empty set below. Same reasoning as
+	// the catalog tests: a guard that can silently assert nothing is not a guard.
+	assert.ok(seen.length > 0, 'no products to page through');
+
 	assert.equal(new Set(seen).size, seen.length, 'a product appeared on two pages');
 });
 
