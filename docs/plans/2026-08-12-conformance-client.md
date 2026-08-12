@@ -24,6 +24,16 @@
 
 ---
 
+> **Correction, 2026-08-12 (during implementation).** As first drafted, this
+> plan contradicted itself: the Prerequisites below record that `preview` is
+> unusable locally and `dev` is the way, but Task 2 Step 7, Task 5 Step 2 and
+> Task 9's README template still carried older "use preview, NOT dev" text.
+> Those three spots have been corrected in place, along with `.env.example`.
+> The Prerequisites were re-verified against the live API before any code was
+> written: a registered origin gets the app's own lowercase allow-origin
+> header, an unregistered one gets Vite's capitalised injected header — the
+> exact discriminator described below.
+
 ## Prerequisites — COMPLETED 2026-08-12, in the Wonderbatch repo
 
 A session scoped to this repo cannot do these. They are already done; recorded
@@ -271,9 +281,10 @@ try {
 	console.error(
 		`✗ Cannot reach the API at ${config.apiBaseUrl}.\n\n` +
 			`  Start it from the Wonderbatch repo:\n` +
-			`    cd ../wonderbatch/web && npm run build && npm run preview\n\n` +
-			`  Use preview, NOT dev — the dev server injects its own permissive CORS\n` +
-			`  headers, which makes every CORS assertion in this suite a false green.`,
+			`    cd ../wonderbatch/web && npm run dev\n\n` +
+			`  Use dev, NOT preview. A production build treats localhost as a\n` +
+			`  non-primary domain and 301s every request — API routes included —\n` +
+			`  to http://wonderbatch.coffee:3000, so nothing here can reach it.`,
 	);
 	process.exit(1);
 }
@@ -306,7 +317,7 @@ if (!response.ok) {
 console.log(`✓ API reachable at ${config.apiBaseUrl}, token and origin accepted.`);
 ```
 
-- [ ] **Step 8: Run it against the live preview server**
+- [ ] **Step 8: Run it against the live dev server**
 
 ```bash
 npm run check
@@ -771,7 +782,9 @@ test('omitting the Origin header entirely still returns 200', async () => {
 node --env-file=.env --test tests/auth.test.ts
 ```
 
-Expected: 5 passing. If the unregistered-origin test returns 200 instead of 403, you are on `vite dev` — switch to preview.
+Expected: 5 passing.
+
+Note: an unregistered-origin **GET** returns 403 on `vite dev` too. Vite only ever *adds* a missing allow-origin header; it never changes a status code. Only the preflight header-absence assertion in Task 6 is affected by dev mode.
 
 - [ ] **Step 3: Commit**
 
@@ -1202,14 +1215,15 @@ reading around it.
 
 ## Running it
 
-The API must be running in **preview** mode first:
+The API must be running first:
 
 ```bash
-cd ../wonderbatch/web && npm run build && npm run preview
+cd ../wonderbatch/web && npm run dev
 ```
 
-Use `preview`, not `dev`. The dev server injects its own permissive CORS
-headers, which turns every CORS assertion here into a false green.
+Use `dev`, **not** `preview` — a preview build 301s every request off
+localhost. See the README for the full reason and for the single assertion this
+costs us.
 
 Then:
 
