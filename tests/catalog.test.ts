@@ -44,6 +44,11 @@ test('product detail matches the declared contract exactly', async () => {
 test('list and detail return identical variants for the same product', async () => {
 	const list = productListSchema.parse((await api.listProducts()).body);
 
+	// An empty catalog would make the loop below a no-op and report green. The
+	// zero case is caught by the first test in this file, but a regression guard
+	// that can silently assert nothing is not a regression guard.
+	assert.ok(list.data.products.length > 0, 'no products to compare');
+
 	for (const product of list.data.products) {
 		const detail = productDetailSchema.parse(
 			(await api.getProduct(product.product_group_id)).body,
@@ -69,6 +74,9 @@ test('list and detail return identical variants for the same product', async () 
  */
 test('image_url is null on every product until 2a gives images a home', async () => {
 	const list = productListSchema.parse((await api.listProducts()).body);
+
+	// Same reason as above: an alarm that can assert nothing is not an alarm.
+	assert.ok(list.data.products.length > 0, 'no products to check');
 
 	for (const product of list.data.products) {
 		assert.equal(product.image_url, null, `${product.product_group_id} has an image_url`);
