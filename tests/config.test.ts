@@ -16,6 +16,29 @@ test('loadConfig returns all four values from the environment', () => {
 	assert.equal(config.channelKey, 'hayb-store');
 });
 
+test('the Vercel bypass secret is optional and absent by default', () => {
+	const config = loadConfig({
+		WB_API_BASE_URL: 'http://localhost:3000',
+		WB_PILOT_ORIGIN: 'http://localhost:5173',
+		WB_STOREFRONT_TOKEN: 'wb_pk_test',
+		WB_CHANNEL_KEY: 'hayb-store',
+	});
+
+	assert.equal(config.vercelBypass, undefined);
+});
+
+test('the Vercel bypass secret is read when present', () => {
+	const config = loadConfig({
+		WB_API_BASE_URL: 'https://dev.wonderbatch.coffee',
+		WB_PILOT_ORIGIN: 'http://localhost:5173',
+		WB_STOREFRONT_TOKEN: 'wb_pk_test',
+		WB_CHANNEL_KEY: 'hayb-store',
+		WB_VERCEL_BYPASS: 'secret123',
+	});
+
+	assert.equal(config.vercelBypass, 'secret123');
+});
+
 test('loadConfig names every missing variable at once', () => {
 	assert.throws(
 		() => loadConfig({ WB_API_BASE_URL: 'http://localhost:3000' }),

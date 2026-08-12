@@ -8,11 +8,21 @@ import { loadConfig } from '../src/config.ts';
 const config = loadConfig();
 const url = `${config.apiBaseUrl}/api/external/storefront/v1/products`;
 
+const headers: Record<string, string> = {
+	Authorization: `Bearer ${config.token}`,
+	Origin: config.origin,
+};
+if (config.vercelBypass) {
+	headers['x-vercel-protection-bypass'] = config.vercelBypass;
+	headers['x-vercel-set-bypass-cookie'] = 'false';
+}
+
 let response: Response;
 try {
 	response = await fetch(url, {
-		headers: { Authorization: `Bearer ${config.token}`, Origin: config.origin },
+		headers,
 		signal: AbortSignal.timeout(10_000),
+		redirect: 'manual',
 	});
 } catch {
 	console.error(
@@ -22,6 +32,27 @@ try {
 			`  Use dev, NOT preview. A production build treats localhost as a\n` +
 			`  non-primary domain and 301s every request — API routes included —\n` +
 			`  to http://wonderbatch.coffee:3000, so nothing here can reach it.`,
+	);
+	process.exit(1);
+}
+
+if (response.status >= 300 && response.status < 400) {
+	const location = response.headers.get('location') ?? '(no Location header)';
+	const isSso = location.includes('vercel.com/sso-api');
+
+	console.error(
+		`✗ The API redirected (${response.status}) instead of answering.\n\n` +
+			`  Location: ${location}\n\n` +
+			(isSso
+				? `  That is Vercel Deployment Protection. dev. and preview.wonderbatch.coffee\n` +
+					`  sit behind SSO, so an unauthenticated request never reaches the app.\n\n` +
+					`  Set WB_VERCEL_BYPASS in .env to the project's Protection Bypass for\n` +
+					`  Automation secret (Vercel → Settings → Deployment Protection).\n` +
+					(config.vercelBypass
+						? `  One IS set and was sent, so it is likely wrong or has been rotated.`
+						: `  None is currently set.`)
+				: `  A production build treats a non-primary host as a redirect target.\n` +
+					`  Check WB_API_BASE_URL.`),
 	);
 	process.exit(1);
 }

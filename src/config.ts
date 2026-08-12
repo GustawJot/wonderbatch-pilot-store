@@ -15,6 +15,17 @@ export interface PilotConfig {
 	token: string;
 	/** Never sent — the API resolves the channel from the token. Ours to assert against. */
 	channelKey: string;
+	/**
+	 * Vercel's Protection Bypass for Automation secret. Optional, and only
+	 * meaningful against a deployed environment.
+	 *
+	 * `dev.` and `preview.wonderbatch.coffee` sit behind Vercel SSO
+	 * (`ssoProtection: all_except_custom_domains`), which 302s an unauthenticated
+	 * request to vercel.com/sso-api before the app ever sees it. This secret gets
+	 * us past the edge; it is NOT an API credential and grants nothing inside the
+	 * app.
+	 */
+	vercelBypass?: string;
 }
 
 const REQUIRED = [
@@ -47,5 +58,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 		origin,
 		token: env.WB_STOREFRONT_TOKEN!,
 		channelKey: env.WB_CHANNEL_KEY!,
+		vercelBypass: env.WB_VERCEL_BYPASS || undefined,
 	};
 }

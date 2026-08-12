@@ -53,10 +53,30 @@ export function createClient(config: PilotConfig): ApiClient {
 		const origin = options.origin === undefined ? config.origin : options.origin;
 		if (origin !== null) headers.set('Origin', origin);
 
+		/**
+		 * Consumed at Vercel's edge, never by the app. Sent on every request
+		 * including preflights — without it a protected deployment 302s us to
+		 * SSO and we would be asserting against a login page.
+		 *
+		 * A real browser preflight carries no such header, so this is a
+		 * deliberate departure from browser behaviour, accepted because the
+		 * alternative is not testing the deployment at all.
+		 */
+		if (config.vercelBypass) {
+			headers.set('x-vercel-protection-bypass', config.vercelBypass);
+			headers.set('x-vercel-set-bypass-cookie', 'false');
+		}
+
 		const response = await fetch(url, {
 			method: options.method ?? 'GET',
 			headers,
 			signal: AbortSignal.timeout(30_000),
+			/**
+			 * A redirect is an observation, not a detour. Following one silently
+			 * would turn an SSO bounce or a stray 301 into an assertion against
+			 * whatever page we landed on.
+			 */
+			redirect: 'manual',
 		});
 
 		const text = await response.text();

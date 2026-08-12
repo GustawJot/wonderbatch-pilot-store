@@ -64,6 +64,41 @@ deployed environment. Its 204 status is still checked locally.
 Ours arrive lowercase, Vite's arrive capitalised, if you ever need to tell them
 apart by hand.
 
+## Running against a deployed environment
+
+Point `WB_API_BASE_URL` at a deployed host and the locally-skipped preflight
+assertion runs for real:
+
+```bash
+WB_API_BASE_URL=https://dev.wonderbatch.coffee npm test
+```
+
+`dev.` and `preview.wonderbatch.coffee` sit behind Vercel SSO
+(`ssoProtection: all_except_custom_domains`), so an unauthenticated request
+302s to `vercel.com/sso-api` and never reaches the app. Set `WB_VERCEL_BYPASS`
+to the project's Protection Bypass for Automation secret to get past the edge.
+The reachability check detects that redirect and says so by name rather than
+letting the suite fail with something unrecognisable.
+
+The client uses `redirect: 'manual'` throughout: a redirect is an observation,
+not a detour. Following one silently would mean asserting against a login page.
+
+### The unregistered-origin preflight, verified 2026-08-12
+
+This is the one assertion the suite cannot make against localhost. It was
+confirmed by direct probe against production, which runs no Vite middleware:
+
+```
+OPTIONS /api/external/storefront/v1/products
+Origin: http://localhost:59999
+→ 204, vary: Origin, allow-methods/headers/max-age present
+→ NO access-control-allow-origin
+```
+
+The app withholds the header, exactly as the contract requires. The header that
+appears locally is Vite's injection, not ours — which is the whole reason this
+suite exists outside the monolith.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill it in. `.env` is gitignored — it holds a
