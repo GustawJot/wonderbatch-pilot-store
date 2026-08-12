@@ -1,0 +1,17 @@
+{
+	"name": "wonderbatch-pilot-store",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Conformance client for the Wonderbatch storefront API v1. HTTP only — no database access by design.",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"test": "node --env-file=.env scripts/check-api-up.ts && node --env-file=.env --test tests/*.test.ts",
+		"check": "node --env-file=.env scripts/check-api-up.ts"
+	},
+	"dependencies": {
+		"zod": "^3.23.8"
+	}
+}
