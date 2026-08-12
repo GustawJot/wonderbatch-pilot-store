@@ -85,8 +85,15 @@ not a detour. Following one silently would mean asserting against a login page.
 
 ### The unregistered-origin preflight, verified 2026-08-12
 
-This is the one assertion the suite cannot make against localhost. It was
-confirmed by direct probe against production, which runs no Vite middleware:
+This is the one assertion the suite cannot make against localhost, and it is
+the load-bearing one: an unregistered origin must get a 204 carrying **no**
+`access-control-allow-origin`, so the browser blocks the real request and we
+leak nothing about which origins are registered.
+
+On 2026-08-12 the full suite ran green against `dev.wonderbatch.coffee` —
+**41 passing, 0 skipped, 0 failing** — with that assertion executing rather
+than skipping. It was independently confirmed against production, which is not
+SSO-protected and runs no Vite middleware:
 
 ```
 OPTIONS /api/external/storefront/v1/products
@@ -98,6 +105,10 @@ Origin: http://localhost:59999
 The app withholds the header, exactly as the contract requires. The header that
 appears locally is Vite's injection, not ours — which is the whole reason this
 suite exists outside the monolith.
+
+The same run also showed the bypass header does not perturb CORS: every CORS
+assertion behaved identically to a local run, so the secret really is consumed
+at the edge and never reaches the app's own logic.
 
 ## Configuration
 
