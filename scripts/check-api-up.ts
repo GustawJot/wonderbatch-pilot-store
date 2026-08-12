@@ -29,9 +29,10 @@ try {
 		`✗ Cannot reach the API at ${config.apiBaseUrl}.\n\n` +
 			`  Start it from the Wonderbatch repo:\n` +
 			`    cd ../wonderbatch/web && npm run dev\n\n` +
-			`  Use dev, NOT preview. A production build treats localhost as a\n` +
-			`  non-primary domain and 301s every request — API routes included —\n` +
-			`  to http://wonderbatch.coffee:3000, so nothing here can reach it.`,
+			`  Use dev, NOT preview. Vite's preview server stamps a wildcard\n` +
+			`  allow-origin header on responses that lack one, and it runs in\n` +
+			`  production mode — so it connects to the PRODUCTION database and a\n` +
+			`  valid dev token is rejected there.`,
 	);
 	process.exit(1);
 }

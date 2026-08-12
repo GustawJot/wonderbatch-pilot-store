@@ -26,16 +26,17 @@ The API must be running first:
 cd ../wonderbatch/web && npm run dev
 ```
 
-Use `dev`, **not** `preview`. Preview does not work locally, for two
-independent reasons confirmed on 2026-08-12:
+Use `dev`, **not** `preview`. Preview does not work locally, for two reasons
+measured on 2026-08-12:
 
-1. A preview build is production-mode, so `hooks.server.ts`'s
-   non-primary-domain rule fires — `localhost` is neither `wonderbatch.coffee`
-   nor `*.vercel.app`, so **every** request 301s to
-   `http://wonderbatch.coffee:3000/pl/...`, API routes included. The storefront
-   API's own hook opt-out sits after that block, so it never runs.
-2. Vite's preview server answers unrecognised Host headers with its own 403,
-   so spoofing the Host to dodge (1) does not work either.
+1. Vite's preview server stamps a wildcard `Access-Control-Allow-Origin` on any
+   response lacking one, so CORS is no more honest there than in dev.
+2. A preview build runs in production mode, which loads `.env.production` — so
+   it connects to the **production database**, and a token that is valid on dev
+   is rejected. That is a footgun in its own right and is filed separately.
+
+A third reason, a 301 that redirected API routes into localized HTML pages, was
+fixed on 2026-08-12 and no longer applies.
 
 Then:
 
