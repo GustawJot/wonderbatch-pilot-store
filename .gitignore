@@ -1,0 +1,8 @@
+# Secrets — the publishable token lives here. Never commit it.
+.env
+.env.*
+!.env.example
+
+node_modules/
+*.log
+.DS_Store
