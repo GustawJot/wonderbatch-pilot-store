@@ -46,6 +46,32 @@ test('adding a purchasable variant returns 200 with the line on the cart', async
 	assert.equal(line.image_url, null);
 });
 
+/**
+ * TOTALS MUST ACTUALLY ROLL UP, not just be well-formed. `item_count` (lines)
+ * and `quantity` (units) are exactly the pair that gets swapped, and a
+ * `net_value` that silently sums gross would be the bug this suite exists to
+ * catch. Computed in integer cents throughout so a float rounding quirk in
+ * the test itself can never manufacture a false red.
+ */
+test('totals.item_count, totals.quantity and totals.net_value roll up correctly', async () => {
+	const cartId = await freshCart();
+	const quantity = 2;
+
+	const res = await api.addCartItem(cartId, {
+		variant_id: purchasableVariant.variant_id,
+		quantity,
+	});
+
+	const body = cartResponseSchema.parse(res.body);
+	const unitPriceCents = Math.round(Number(purchasableVariant.net_price) * 100);
+	const expectedNetValue = ((unitPriceCents * quantity) / 100).toFixed(2);
+
+	assert.equal(body.data.cart.totals.item_count, 1, 'one distinct line');
+	assert.equal(body.data.cart.totals.quantity, quantity, 'total units across all lines');
+	assert.equal(body.data.cart.totals.net_value, expectedNetValue);
+	assert.equal(body.data.cart.totals.currency, purchasableVariant.currency);
+});
+
 test('adding the same variant twice increments the line, not duplicates it', async () => {
 	const cartId = await freshCart();
 
