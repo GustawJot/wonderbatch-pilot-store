@@ -116,7 +116,15 @@ export const cartItemSchema = z
 		net_weight: z.number().positive(),
 		quantity: z.number().int().min(1).max(99),
 		unit_price: netMoneySchema,
-		availability: z.string().min(1),
+		/**
+		 * `hidden` must never appear here — the buyer already put the line in
+		 * their cart, so a variant the seller has since unlisted reports
+		 * `out_of_stock` instead (same anti-enumeration reason as the catalog,
+		 * which drops `hidden` variants outright rather than labelling them).
+		 */
+		availability: z.string().min(1).refine((v) => v !== 'hidden', {
+			message: 'availability must never be "hidden" on the cart wire',
+		}),
 		is_purchasable: z.boolean(),
 		/** Same 2a gap as the catalog — always null in v1. */
 		image_url: z.string().nullable(),

@@ -94,6 +94,18 @@ test('a cart item quantity outside 1-99 fails validation', () => {
 	assert.throws(() => cartItemSchema.parse({ ...validCartItem, quantity: 100 }));
 });
 
+/**
+ * A REGRESSION GUARD, NOT A HYPOTHETICAL. API.md is emphatic that `hidden`
+ * must never reach the cart wire — a line whose variant the seller has since
+ * unlisted reports `out_of_stock` instead, for the same anti-enumeration
+ * reason the catalog drops `hidden` variants outright. If this ever starts
+ * failing against a real response, that is the API leaking a seller's
+ * unlisted-weight decision to a buyer's browser, not a test to loosen.
+ */
+test('availability "hidden" on a cart item fails validation', () => {
+	assert.throws(() => cartItemSchema.parse({ ...validCartItem, availability: 'hidden' }));
+});
+
 test('unit_price must be net-only — a gross field would fail as unexpected', () => {
 	assert.throws(() =>
 		cartItemSchema.parse({
