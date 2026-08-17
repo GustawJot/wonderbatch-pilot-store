@@ -6,3 +6,6 @@
 node_modules/
 *.log
 .DS_Store
+
+# The request-pacing tally (see src/pacing.ts) — per-machine runtime state.
+.request-window.json
