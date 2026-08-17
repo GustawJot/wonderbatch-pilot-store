@@ -7,6 +7,7 @@
  */
 
 import type { PilotConfig } from './config.ts';
+import { paceForSharedBudget } from './pacing.ts';
 
 const BASE_PATH = '/api/external/storefront/v1';
 
@@ -57,6 +58,21 @@ export interface UpdateCartItemInput {
 	buyer_reference?: string;
 }
 
+/**
+ * Query of `GET /shipping/pickup-points`. Every field is optional HERE even
+ * though `method_id` and `postal_code` are required on the wire — omitting
+ * one is exactly how the validation tests exercise the 400s.
+ */
+export interface PickupPointSearchParams {
+	method_id?: string;
+	postal_code?: string;
+	country_code?: string;
+	limit?: number | string;
+	street?: string;
+	building?: string;
+	city?: string;
+}
+
 export interface ApiClient {
 	listProducts(options?: ListOptions): Promise<ApiResult>;
 	getProduct(productGroupId: string, options?: RequestOverrides): Promise<ApiResult>;
@@ -75,6 +91,11 @@ export interface ApiClient {
 		options?: RequestOverrides,
 	): Promise<ApiResult>;
 	removeCartItem(cartId: string, variantId: string, options?: RequestOverrides): Promise<ApiResult>;
+	getShippingMethods(options?: RequestOverrides): Promise<ApiResult>;
+	searchPickupPoints(
+		params?: PickupPointSearchParams,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
 }
 
 export function createClient(config: PilotConfig): ApiClient {
@@ -114,6 +135,11 @@ export function createClient(config: PilotConfig): ApiClient {
 		}
 
 		if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+
+		// The API budgets 120 requests per rolling minute and a full run now
+		// exceeds that — wait here, when the window is full, rather than let
+		// the tail of the suite drown in self-inflicted 429s (see pacing.ts).
+		await paceForSharedBudget();
 
 		const response = await fetch(url, {
 			method: options.method ?? 'GET',
@@ -187,6 +213,18 @@ export function createClient(config: PilotConfig): ApiClient {
 				`/carts/${encodeURIComponent(cartId)}/items/${encodeURIComponent(variantId)}`,
 				{ ...options, method: 'DELETE' },
 			);
+		},
+
+		getShippingMethods(options = {}) {
+			return request('/shipping/methods', options);
+		},
+
+		searchPickupPoints(params = {}, options = {}) {
+			const query: Record<string, string> = {};
+			for (const [key, value] of Object.entries(params)) {
+				if (value !== undefined) query[key] = String(value);
+			}
+			return request('/shipping/pickup-points', { ...options, query });
 		},
 	};
 }

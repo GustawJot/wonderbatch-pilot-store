@@ -7,6 +7,8 @@ import {
 	cartItemSchema,
 	cartSchema,
 	cartResponseSchema,
+	shippingMethodSchema,
+	pickupPointSchema,
 } from '../src/schemas.ts';
 
 const validVariant = {
@@ -134,4 +136,80 @@ test('the cart response envelope wraps a single cart', () => {
 	assert.doesNotThrow(() =>
 		cartResponseSchema.parse({ success: true, data: { cart: validCart } }),
 	);
+});
+
+const validShippingMethod = {
+	id: 'inpost_locker_pl',
+	type: 'locker',
+	carrier: 'inpost',
+	requires_pickup_point: true,
+	shipping_fee: { net: '11.99', currency: 'PLN' },
+};
+
+test('a well-formed shipping method validates, a "0.00" free-delivery fee included', () => {
+	assert.doesNotThrow(() => shippingMethodSchema.parse(validShippingMethod));
+	assert.doesNotThrow(() =>
+		shippingMethodSchema.parse({
+			...validShippingMethod,
+			shipping_fee: { net: '0.00', currency: 'PLN' },
+		}),
+	);
+});
+
+/**
+ * A REGRESSION GUARD, NOT A HYPOTHETICAL. The offer resolver carries a
+ * `source` diagnostic ("configured" vs "default") that the route
+ * deliberately keeps OFF the wire — publishing it would let a competitor
+ * tell a hand-configured store from an untouched one for free. If this test
+ * ever fails against a real response, that is the diagnostic leaking, not a
+ * schema to loosen.
+ */
+test('the resolver-internal `source` field on a shipping method fails validation', () => {
+	assert.throws(() => shippingMethodSchema.parse({ ...validShippingMethod, source: 'configured' }));
+});
+
+test('the sketch-era `price` name fails validation — the wire field is `shipping_fee`', () => {
+	const { shipping_fee, ...renamed } = validShippingMethod;
+	assert.throws(() => shippingMethodSchema.parse({ ...renamed, price: shipping_fee }));
+	// Even alongside a correct shipping_fee, a stray `price` is still drift.
+	assert.throws(() => shippingMethodSchema.parse({ ...validShippingMethod, price: shipping_fee }));
+});
+
+test('a shipping fee outside the PLN/EUR picklist fails validation', () => {
+	assert.throws(() =>
+		shippingMethodSchema.parse({
+			...validShippingMethod,
+			shipping_fee: { net: '11.99', currency: 'USD' },
+		}),
+	);
+});
+
+const validPickupPoint = {
+	code: 'WAW123A',
+	name: 'Paczkomat WAW123A',
+	address: 'Prosta 1',
+	city: 'Warszawa',
+	postal_code: '00-001',
+	location: { latitude: 52.2297, longitude: 21.0122 },
+	distance_meters: 240,
+	opening_hours: '24/7',
+	location_description: 'Przy wejściu do sklepu',
+	is_available_247: true,
+	carrier_id: 'inpost',
+};
+
+test('a well-formed pickup point validates, nulled nullables included', () => {
+	assert.doesNotThrow(() => pickupPointSchema.parse(validPickupPoint));
+	assert.doesNotThrow(() =>
+		pickupPointSchema.parse({
+			...validPickupPoint,
+			distance_meters: null,
+			location_description: null,
+		}),
+	);
+});
+
+test('an omitted location_description fails validation — nullable means explicit null, never absent', () => {
+	const { location_description, ...omitted } = validPickupPoint;
+	assert.throws(() => pickupPointSchema.parse(omitted));
 });

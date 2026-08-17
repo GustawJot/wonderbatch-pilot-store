@@ -162,3 +162,77 @@ export const cartResponseSchema = z
 		data: z.object({ cart: cartSchema }).strict(),
 	})
 	.strict();
+
+/**
+ * `shipping_fee` on an offered method. Net-only like every money field on
+ * this wire, and `"0.00"` is a real fee (free delivery), never an absent
+ * field. Unlike the catalog's open 3-letter currency, this one is a CLOSED
+ * picklist — the engine's offer store accepts exactly PLN and EUR, so any
+ * other value reaching the wire is drift, not a new market.
+ */
+export const shippingFeeSchema = z
+	.object({
+		net: z.string().regex(/^\d+\.\d{2}$/),
+		currency: z.enum(['PLN', 'EUR']),
+	})
+	.strict();
+
+export const shippingMethodSchema = z
+	.object({
+		/** Engine bucket id — the exact value 3c-4's order placement will accept. */
+		id: z.string().min(1),
+		type: z.enum(['locker', 'courier', 'pickup_point']),
+		carrier: z.string().min(1),
+		requires_pickup_point: z.boolean(),
+		/**
+		 * The wire name is `shipping_fee`, NOT the contract sketch's `price`
+		 * (naming ruling, spec §4) — and the resolver's internal `source`
+		 * diagnostic ("configured" vs "default") must never appear, because it
+		 * would let anyone tell a hand-configured store from an untouched one.
+		 * `.strict()` turns either drift into a parse failure.
+		 */
+		shipping_fee: shippingFeeSchema,
+	})
+	.strict();
+
+/**
+ * `GET /shipping/methods`. An empty `methods` is valid — a seller who
+ * switched every method off offers nothing, and this endpoint says so
+ * truthfully rather than inventing a default.
+ */
+export const shippingMethodsResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z.object({ methods: z.array(shippingMethodSchema) }).strict(),
+	})
+	.strict();
+
+export const pickupPointSchema = z
+	.object({
+		/** The value 3c-4's `collection_point_code` accepts — the cross-slice contract. */
+		code: z.string().min(1),
+		name: z.string().min(1),
+		address: z.string(),
+		city: z.string(),
+		postal_code: z.string().min(1),
+		location: z.object({ latitude: z.number(), longitude: z.number() }).strict(),
+		distance_meters: z.number().nullable(),
+		opening_hours: z.string(),
+		/** Explicit `null`, never omitted — the wire rule for nullable fields. */
+		location_description: z.string().nullable(),
+		is_available_247: z.boolean(),
+		carrier_id: z.string().min(1),
+	})
+	.strict();
+
+/**
+ * `GET /shipping/pickup-points`. `points: []` is a REAL success — "searched
+ * fine, found nothing" is a renderable outcome (ruling 2026-08-17), and this
+ * surface reserves 404 for its anti-enumeration meaning.
+ */
+export const pickupPointsResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z.object({ points: z.array(pickupPointSchema) }).strict(),
+	})
+	.strict();
