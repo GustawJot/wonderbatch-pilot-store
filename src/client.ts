@@ -29,16 +29,62 @@ export interface ListOptions extends RequestOverrides {
 	offset?: number | string;
 }
 
+/**
+ * Body of `POST /carts`. Both fields are optional — an empty or absent body
+ * is fine, per the API contract.
+ */
+export interface CreateCartOptions extends RequestOverrides {
+	buyer_reference?: string;
+}
+
+/**
+ * Body of `POST /carts/:cart_id/items`. Field names match the wire exactly —
+ * this client does no camelCase translation, so the body it sends is the
+ * body a reader sees in the assertion.
+ */
+export interface AddCartItemInput {
+	variant_id: string;
+	quantity: number | string;
+	buyer_reference?: string;
+}
+
+/**
+ * Body of `PATCH /carts/:cart_id/items/:variant_id`. `DELETE` has no
+ * equivalent input type — it takes no body, by design (see API.md).
+ */
+export interface UpdateCartItemInput {
+	quantity: number | string;
+	buyer_reference?: string;
+}
+
 export interface ApiClient {
 	listProducts(options?: ListOptions): Promise<ApiResult>;
 	getProduct(productGroupId: string, options?: RequestOverrides): Promise<ApiResult>;
 	preflight(path: string, options?: Pick<RequestOverrides, 'origin'>): Promise<ApiResult>;
+	createCart(options?: CreateCartOptions): Promise<ApiResult>;
+	getCart(cartId: string, options?: RequestOverrides): Promise<ApiResult>;
+	addCartItem(
+		cartId: string,
+		item: AddCartItemInput,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
+	updateCartItem(
+		cartId: string,
+		variantId: string,
+		update: UpdateCartItemInput,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
+	removeCartItem(cartId: string, variantId: string, options?: RequestOverrides): Promise<ApiResult>;
 }
 
 export function createClient(config: PilotConfig): ApiClient {
 	async function request(
 		path: string,
-		options: RequestOverrides & { method?: string; query?: Record<string, string> } = {},
+		options: RequestOverrides & {
+			method?: string;
+			query?: Record<string, string>;
+			body?: unknown;
+		} = {},
 	): Promise<ApiResult> {
 		const url = new URL(`${config.apiBaseUrl}${BASE_PATH}${path}`);
 		for (const [key, value] of Object.entries(options.query ?? {})) {
@@ -67,9 +113,12 @@ export function createClient(config: PilotConfig): ApiClient {
 			headers.set('x-vercel-set-bypass-cookie', 'false');
 		}
 
+		if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+
 		const response = await fetch(url, {
 			method: options.method ?? 'GET',
 			headers,
+			body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 			signal: AbortSignal.timeout(30_000),
 			/**
 			 * A redirect is an observation, not a detour. Following one silently
@@ -105,6 +154,39 @@ export function createClient(config: PilotConfig): ApiClient {
 
 		preflight(path, options = {}) {
 			return request(path, { ...options, method: 'OPTIONS', token: null });
+		},
+
+		createCart(options = {}) {
+			const { buyer_reference, ...overrides } = options;
+			const body: Record<string, unknown> = {};
+			if (buyer_reference !== undefined) body.buyer_reference = buyer_reference;
+			return request('/carts', { ...overrides, method: 'POST', body });
+		},
+
+		getCart(cartId, options = {}) {
+			return request(`/carts/${encodeURIComponent(cartId)}`, options);
+		},
+
+		addCartItem(cartId, item, options = {}) {
+			return request(`/carts/${encodeURIComponent(cartId)}/items`, {
+				...options,
+				method: 'POST',
+				body: item,
+			});
+		},
+
+		updateCartItem(cartId, variantId, update, options = {}) {
+			return request(
+				`/carts/${encodeURIComponent(cartId)}/items/${encodeURIComponent(variantId)}`,
+				{ ...options, method: 'PATCH', body: update },
+			);
+		},
+
+		removeCartItem(cartId, variantId, options = {}) {
+			return request(
+				`/carts/${encodeURIComponent(cartId)}/items/${encodeURIComponent(variantId)}`,
+				{ ...options, method: 'DELETE' },
+			);
 		},
 	};
 }

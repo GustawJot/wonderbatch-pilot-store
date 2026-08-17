@@ -134,3 +134,14 @@ request 403 for a reason nobody would guess.
 Each new endpoint is one function in `src/client.ts`, one schema in
 `src/schemas.ts`, and one test file. The cart endpoints (3c) will be the first
 that hold state between requests.
+
+## Known gaps
+
+- **Cart endpoint coverage exists but has not run against a live server.**
+  `createCart`/`getCart`/`addCartItem`/`updateCartItem`/`removeCartItem` and
+  their five test files (branch `feat/3c-2-cart-conformance`) were written
+  against the API those endpoints ship on
+  (`feat/3c-2-cart-endpoints` in the Wonderbatch repo, local-only, not yet
+  deployed anywhere). The "41 passing" figure above is the catalog suite
+  only — it does not yet include the cart tests. See that branch's
+  `task-5-report.md` for exactly what's verified vs. inferred.

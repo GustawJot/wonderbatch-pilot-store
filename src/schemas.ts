@@ -95,3 +95,70 @@ export const errorSchema = z
 			.strict(),
 	})
 	.strict();
+
+/**
+ * `unit_price` on a cart line. Net only, same reasoning as the catalog's
+ * `net_price`: gross needs the buyer's delivery destination, which isn't
+ * known until checkout.
+ */
+export const netMoneySchema = z
+	.object({
+		net: z.string().regex(/^\d+\.\d{2}$/),
+		currency: z.string().length(3),
+	})
+	.strict();
+
+export const cartItemSchema = z
+	.object({
+		variant_id: z.string().min(1),
+		product_group_id: z.string().min(1),
+		name: z.string().min(1),
+		net_weight: z.number().positive(),
+		quantity: z.number().int().min(1).max(99),
+		unit_price: netMoneySchema,
+		/**
+		 * `hidden` must never appear here — the buyer already put the line in
+		 * their cart, so a variant the seller has since unlisted reports
+		 * `out_of_stock` instead (same anti-enumeration reason as the catalog,
+		 * which drops `hidden` variants outright rather than labelling them).
+		 */
+		availability: z.string().min(1).refine((v) => v !== 'hidden', {
+			message: 'availability must never be "hidden" on the cart wire',
+		}),
+		is_purchasable: z.boolean(),
+		/** Same 2a gap as the catalog — always null in v1. */
+		image_url: z.string().nullable(),
+		added_at: z.string().datetime(),
+	})
+	.strict();
+
+export const cartTotalsSchema = z
+	.object({
+		item_count: z.number().int().nonnegative(),
+		quantity: z.number().int().nonnegative(),
+		net_value: z.string().regex(/^\d+\.\d{2}$/),
+		currency: z.string().length(3),
+	})
+	.strict();
+
+export const cartSchema = z
+	.object({
+		/** `crt_` + 43 random base64url characters — this token IS the credential. */
+		id: z.string().regex(/^crt_/),
+		items: z.array(cartItemSchema),
+		totals: cartTotalsSchema,
+		created_at: z.string().datetime(),
+	})
+	.strict();
+
+/**
+ * The shape returned by every cart endpoint — `POST /carts`, `GET
+ * /carts/:cart_id`, and both item mutations all return this same envelope
+ * around the current cart.
+ */
+export const cartResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z.object({ cart: cartSchema }).strict(),
+	})
+	.strict();
