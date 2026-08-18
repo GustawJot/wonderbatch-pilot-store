@@ -129,6 +129,31 @@ request 403 for a reason nobody would guess.
 - **Unknown response fields fail validation.** Adding a field to the API is
   still a contract change, and a real store's parser may not tolerate it.
 
+## What the orders tests cost (3c-4a)
+
+The order endpoints cannot be conformance-tested without using them:
+`tests/orders.test.ts` places a REAL pending order in the dev database and
+decrements REAL dev stock, shared with the dev marketplace. There is no
+cleanup — this repo has no DB access by design (the one rule), so the rows
+are accepted dev litter.
+
+**One full run costs exactly 1 pending order and 2 units of stock** on the
+first purchasable variant in the catalog. Everything shares that single
+placement: the happy path, the idempotent replay, and every `GET /orders/:id`
+assertion. The `INSUFFICIENT_STOCK` path reserves nothing.
+
+Two dev-data invariants the file leans on (both explained in its header):
+
+- **Every variant's stock stays ≤ 100.** The stock-refusal test over-requests
+  99 (the cart's per-line cap) of the same variant the shared placement
+  bought 2 of; reservation succeeds at equality, so stock must sit below 99
+  by then. That is also why the placement buys 2 and not 1 — at the measured
+  dev stock of exactly 100, a quantity-1 placement would leave 99 and the
+  99-request would PLACE a real 99-unit order instead of refusing.
+- **The first purchasable variant keeps a few units.** The suite drains 2 per
+  run (~49 runs from a full shelf of 100); restock it — to at most 100 —
+  when it runs low.
+
 ## Adding endpoints
 
 Each new endpoint is one function in `src/client.ts`, one schema in

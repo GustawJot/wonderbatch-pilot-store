@@ -236,3 +236,146 @@ export const pickupPointsResponseSchema = z
 		data: z.object({ points: z.array(pickupPointSchema) }).strict(),
 	})
 	.strict();
+
+/**
+ * Money on the ORDER wire. Unlike the cart's net-only `unit_price`, an order
+ * knows its VAT country, so every money block widens to net + gross +
+ * `vat_rate` (a decimal STRING like "0.23" — a JSON number would re-float) +
+ * sibling `currency`. Used for order items' `unit_price`, and — same shape —
+ * for the order's `shipping_fee`.
+ */
+export const grossMoneySchema = z
+	.object({
+		net: z.string().regex(/^\d+\.\d{2}$/),
+		gross: z.string().regex(/^\d+\.\d{2}$/),
+		vat_rate: z.string().regex(/^\d+(\.\d+)?$/),
+		currency: z.string().length(3),
+	})
+	.strict();
+
+export const orderItemSchema = z
+	.object({
+		/** The same `variant_id` the catalog and cart speak. */
+		variant_id: z.string().min(1),
+		name: z.string().min(1),
+		net_weight: z.number().positive(),
+		/** The cart's per-line cap carries through — an order line mirrors it. */
+		quantity: z.number().int().min(1).max(99),
+		unit_price: grossMoneySchema,
+	})
+	.strict();
+
+export const orderTotalsSchema = z
+	.object({
+		item_count: z.number().int().nonnegative(),
+		quantity: z.number().int().nonnegative(),
+		net_value: z.string().regex(/^\d+\.\d{2}$/),
+		gross_value: z.string().regex(/^\d+\.\d{2}$/),
+		/**
+		 * The residual `gross − net`, never an independently rounded
+		 * `net × rate` — the engine's money-spine rule, re-asserted
+		 * arithmetically in the order tests.
+		 */
+		vat_amount: z.string().regex(/^\d+\.\d{2}$/),
+		vat_rate: z.string().regex(/^\d+(\.\d+)?$/),
+		/** Destination-principle VAT country (ISO 3166-1 alpha-2). */
+		vat_country: z.string().length(2),
+		currency: z.string().length(3),
+	})
+	.strict();
+
+/** Null until the shipment carries a tracking number — never omitted. */
+export const orderTrackingSchema = z
+	.object({
+		carrier: z.string().min(1),
+		tracking_number: z.string().min(1),
+		tracking_url: z.string().nullable(),
+	})
+	.strict();
+
+/**
+ * The order as BOTH order endpoints serve it — `POST /orders` (201) and
+ * `GET /orders/:id` (200) share one serializer by contract, so one schema
+ * covers both and any drift between the two doors fails a parse.
+ *
+ * The three `*_at` milestones and `tracking` are ALWAYS present, explicit
+ * `null` until each exists — the wire rule for nullable fields.
+ */
+export const orderSchema = z
+	.object({
+		/** Mongo ObjectId hex — opaque to us, but its shape never drifts. */
+		id: z.string().regex(/^[0-9a-f]{24}$/),
+		/**
+		 * The non-marketplace channel family: `YYMMDD/NNNN-{TOKEN}`. The
+		 * marketplace's reserved `WONDER-…-BATCH` shape must NEVER appear on
+		 * this surface — a storefront token can only read its own channel's
+		 * orders. The pilot channel's exact token is asserted in the tests
+		 * (registry data, not schema).
+		 */
+		order_number: z.string().regex(/^\d{6}\/\d{4}-[A-Z0-9][A-Z0-9-]*$/),
+		/** The per-order secret — shown once here, required by every order read. */
+		order_token: z.string().min(1),
+		payment_status: z.string().min(1),
+		fulfilment_status: z.string().min(1),
+		delivery_status: z.string().min(1),
+		/** An order cannot be empty — placement refuses an empty cart. */
+		items: z.array(orderItemSchema).min(1),
+		totals: orderTotalsSchema,
+		shipping_fee: grossMoneySchema,
+		delivery: z
+			.object({
+				method_id: z.string().min(1),
+				collection_point_code: z.string().nullable(),
+			})
+			.strict(),
+		tracking: orderTrackingSchema.nullable(),
+		buyer_reference: z.string().nullable(),
+		created_at: z.string().datetime(),
+		paid_at: z.string().datetime().nullable(),
+		dispatched_at: z.string().datetime().nullable(),
+		delivered_at: z.string().datetime().nullable(),
+	})
+	.strict();
+
+export const orderResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z.object({ order: orderSchema }).strict(),
+	})
+	.strict();
+
+/**
+ * The one error whose `details` is CONTRACT, not diagnostics: 409
+ * `INSUFFICIENT_STOCK` promises `details.lines[]` naming each variant that
+ * could not be reserved, so a store can render exactly which lines to trim.
+ * Strict throughout — the generic `errorSchema` would accept any `details`
+ * blob, which is precisely the drift this schema exists to catch.
+ */
+export const insufficientStockErrorSchema = z
+	.object({
+		success: z.literal(false),
+		error: z
+			.object({
+				category: z.literal('conflict'),
+				message: z.string().min(1),
+				code: z.literal('INSUFFICIENT_STOCK'),
+				details: z
+					.object({
+						lines: z
+							.array(
+								z
+									.object({
+										variant_id: z.string().min(1),
+										name: z.string().min(1),
+										requested_quantity: z.number().int().positive(),
+										available_stock: z.number().int().nonnegative(),
+									})
+									.strict(),
+							)
+							.min(1),
+					})
+					.strict(),
+			})
+			.strict(),
+	})
+	.strict();

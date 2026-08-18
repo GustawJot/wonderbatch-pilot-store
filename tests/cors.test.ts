@@ -53,14 +53,40 @@ test('a 401 still carries CORS headers', async () => {
 	assert.match(res.headers.get('vary') ?? '', /Origin/i);
 });
 
+/**
+ * The allow-headers list WIDENED in 3c-4a: the order endpoints introduced two
+ * endpoint-specific request headers (`Idempotency-Key` on POST /orders,
+ * `X-Order-Token` on order reads), and the API advertises one list on every
+ * preflight rather than a per-route one. A header missing from this list is
+ * stripped by the browser after preflight — the order routes would 400
+ * cross-origin before either header was ever seen — so the two appearing
+ * here is load-bearing, not cosmetic. Asserted exactly, as before: the NEXT
+ * addition should fail this test and be made conscious too.
+ */
+const ALLOWED_HEADERS = 'Content-Type, Authorization, Idempotency-Key, X-Order-Token';
+
 test('a preflight from a registered origin is approved', async () => {
 	const res = await api.preflight('/products');
 
 	assert.equal(res.status, 204);
 	assert.equal(res.headers.get('access-control-allow-origin'), config.origin);
 	assert.equal(res.headers.get('access-control-allow-methods'), 'GET, POST, PATCH, DELETE, OPTIONS');
-	assert.equal(res.headers.get('access-control-allow-headers'), 'Content-Type, Authorization');
+	assert.equal(res.headers.get('access-control-allow-headers'), ALLOWED_HEADERS);
 	assert.equal(res.headers.get('access-control-max-age'), '86400');
+});
+
+test('a preflight on /orders advertises the Idempotency-Key header', async () => {
+	const res = await api.preflight('/orders');
+
+	assert.equal(res.status, 204);
+	assert.match(res.headers.get('access-control-allow-headers') ?? '', /Idempotency-Key/);
+});
+
+test('a preflight on /orders/:id advertises the X-Order-Token header', async () => {
+	const res = await api.preflight('/orders/665f1b2c3d4e5f6071828394');
+
+	assert.equal(res.status, 204);
+	assert.match(res.headers.get('access-control-allow-headers') ?? '', /X-Order-Token/);
 });
 
 /**
