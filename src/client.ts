@@ -59,6 +59,40 @@ export interface UpdateCartItemInput {
 }
 
 /**
+ * Body of `POST /orders`, minus `cart_id` — the client threads that in from
+ * its own first argument so a test can never place from one cart while
+ * naming another. Field names match the wire exactly, as everywhere.
+ *
+ * `discount_code` is typed `unknown` on purpose: the field is RESERVED in
+ * v1 (only `null` or omission passes), and sending a non-null value is
+ * exactly how the reserved-field 400 is exercised.
+ */
+export interface PlaceOrderBody {
+	buyer: {
+		first_name: string;
+		last_name: string;
+		email: string;
+		phone: string;
+		phone_prefix: string;
+		invoice?: { company_name?: string; tax_id?: string };
+	};
+	delivery: {
+		method_id: string;
+		collection_point_code?: string;
+		address?: {
+			street: string;
+			building: string;
+			apartment?: string;
+			city: string;
+			postal_code: string;
+			country: string;
+		};
+	};
+	discount_code?: unknown;
+	buyer_reference?: string | null;
+}
+
+/**
  * Query of `GET /shipping/pickup-points`. Every field is optional HERE even
  * though `method_id` and `postal_code` are required on the wire — omitting
  * one is exactly how the validation tests exercise the 400s.
@@ -96,6 +130,25 @@ export interface ApiClient {
 		params?: PickupPointSearchParams,
 		options?: RequestOverrides,
 	): Promise<ApiResult>;
+	/**
+	 * `POST /orders`. `idempotencyKey: null` omits the header — which is how
+	 * the missing-key 400 is exercised (same convention as `token: null`).
+	 */
+	placeOrder(
+		cartId: string,
+		body: PlaceOrderBody,
+		idempotencyKey: string | null,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
+	/**
+	 * `GET /orders/:id`. `orderToken: null` omits the `X-Order-Token` header —
+	 * the missing-header 400, same convention as above.
+	 */
+	getOrder(
+		orderId: string,
+		orderToken: string | null,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
 }
 
 export function createClient(config: PilotConfig): ApiClient {
@@ -105,6 +158,8 @@ export function createClient(config: PilotConfig): ApiClient {
 			method?: string;
 			query?: Record<string, string>;
 			body?: unknown;
+			/** Endpoint-specific headers (`Idempotency-Key`, `X-Order-Token`). */
+			extraHeaders?: Record<string, string>;
 		} = {},
 	): Promise<ApiResult> {
 		const url = new URL(`${config.apiBaseUrl}${BASE_PATH}${path}`);
@@ -135,6 +190,10 @@ export function createClient(config: PilotConfig): ApiClient {
 		}
 
 		if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+
+		for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
+			headers.set(name, value);
+		}
 
 		// The API budgets 120 requests per rolling minute and a full run now
 		// exceeds that — wait here, when the window is full, rather than let
@@ -225,6 +284,24 @@ export function createClient(config: PilotConfig): ApiClient {
 				if (value !== undefined) query[key] = String(value);
 			}
 			return request('/shipping/pickup-points', { ...options, query });
+		},
+
+		placeOrder(cartId, body, idempotencyKey, options = {}) {
+			return request('/orders', {
+				...options,
+				method: 'POST',
+				body: { cart_id: cartId, ...body },
+				...(idempotencyKey !== null
+					? { extraHeaders: { 'Idempotency-Key': idempotencyKey } }
+					: {}),
+			});
+		},
+
+		getOrder(orderId, orderToken, options = {}) {
+			return request(`/orders/${encodeURIComponent(orderId)}`, {
+				...options,
+				...(orderToken !== null ? { extraHeaders: { 'X-Order-Token': orderToken } } : {}),
+			});
 		},
 	};
 }

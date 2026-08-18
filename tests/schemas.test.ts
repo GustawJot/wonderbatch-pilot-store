@@ -9,6 +9,8 @@ import {
 	cartResponseSchema,
 	shippingMethodSchema,
 	pickupPointSchema,
+	orderSchema,
+	insufficientStockErrorSchema,
 } from '../src/schemas.ts';
 
 const validVariant = {
@@ -212,4 +214,102 @@ test('a well-formed pickup point validates, nulled nullables included', () => {
 test('an omitted location_description fails validation — nullable means explicit null, never absent', () => {
 	const { location_description, ...omitted } = validPickupPoint;
 	assert.throws(() => pickupPointSchema.parse(omitted));
+});
+
+const validOrder = {
+	id: '665f1b2c3d4e5f6071828394',
+	order_number: '260818/1001-HAY-PL',
+	order_token: '8c1e2f4a-1234-4abc-9def-567890abcdef',
+	payment_status: 'pending',
+	fulfilment_status: 'unfulfilled',
+	delivery_status: 'not_dispatched',
+	items: [
+		{
+			variant_id: '665f1a2b3c4d5e6f70818283',
+			name: 'Espresso Blend',
+			net_weight: 250,
+			quantity: 2,
+			unit_price: { net: '39.90', gross: '49.08', vat_rate: '0.23', currency: 'PLN' },
+		},
+	],
+	totals: {
+		item_count: 1,
+		quantity: 2,
+		net_value: '79.80',
+		gross_value: '98.15',
+		vat_amount: '18.35',
+		vat_rate: '0.23',
+		vat_country: 'PL',
+		currency: 'PLN',
+	},
+	shipping_fee: { net: '11.99', gross: '14.75', vat_rate: '0.23', currency: 'PLN' },
+	delivery: { method_id: 'inpost_locker_pl', collection_point_code: 'KRA01A' },
+	tracking: null,
+	buyer_reference: null,
+	created_at: '2026-08-18T10:15:00.000Z',
+	paid_at: null,
+	dispatched_at: null,
+	delivered_at: null,
+};
+
+test('a well-formed order validates, tracking block included', () => {
+	assert.doesNotThrow(() => orderSchema.parse(validOrder));
+	assert.doesNotThrow(() =>
+		orderSchema.parse({
+			...validOrder,
+			paid_at: '2026-08-18T10:20:00.000Z',
+			tracking: { carrier: 'inpost', tracking_number: '520000123', tracking_url: null },
+		}),
+	);
+});
+
+test('an order with an UNEXPECTED field fails validation — a leaked buyer block would be caught here', () => {
+	assert.throws(() => orderSchema.parse({ ...validOrder, buyer: { email: 'a@b.co' } }));
+});
+
+test('the marketplace order-number family fails validation — only the channel family belongs on this wire', () => {
+	assert.throws(() =>
+		orderSchema.parse({ ...validOrder, order_number: 'WONDER-260818/1001-BATCH' }),
+	);
+});
+
+test('an order money block must carry all four fields — a net-only unit_price fails', () => {
+	const netOnly = { ...validOrder.items[0], unit_price: { net: '39.90', currency: 'PLN' } };
+	assert.throws(() => orderSchema.parse({ ...validOrder, items: [netOnly] }));
+});
+
+test('an omitted paid_at fails validation — milestones are explicit null, never absent', () => {
+	const { paid_at, ...omitted } = validOrder;
+	assert.throws(() => orderSchema.parse(omitted));
+});
+
+test('the INSUFFICIENT_STOCK envelope validates, and a lineless details fails', () => {
+	const line = {
+		variant_id: '665f1a2b3c4d5e6f70818283',
+		name: 'Espresso Blend',
+		requested_quantity: 99,
+		available_stock: 3,
+	};
+	assert.doesNotThrow(() =>
+		insufficientStockErrorSchema.parse({
+			success: false,
+			error: {
+				category: 'conflict',
+				message: 'Not enough stock for "Espresso Blend". Available: 3, requested: 99.',
+				code: 'INSUFFICIENT_STOCK',
+				details: { lines: [line] },
+			},
+		}),
+	);
+	assert.throws(() =>
+		insufficientStockErrorSchema.parse({
+			success: false,
+			error: {
+				category: 'conflict',
+				message: 'Not enough stock.',
+				code: 'INSUFFICIENT_STOCK',
+				details: { lines: [] },
+			},
+		}),
+	);
 });
