@@ -150,9 +150,35 @@ Two dev-data invariants the file leans on (both explained in its header):
   by then. That is also why the placement buys 2 and not 1 — at the measured
   dev stock of exactly 100, a quantity-1 placement would leave 99 and the
   99-request would PLACE a real 99-unit order instead of refusing.
-- **The first purchasable variant keeps a few units.** The suite drains 2 per
-  run (~49 runs from a full shelf of 100); restock it — to at most 100 —
-  when it runs low.
+- **The first purchasable variant keeps a few units.** The full suite drains
+  3 per run — 2 in `orders.test.ts` plus 1 in `payments.test.ts` (below) —
+  so ~33 runs from a full shelf of 100; restock it — to at most 100 — when
+  it runs low.
+
+## What the payment tests cost (3c-4b)
+
+`tests/payments.test.ts` shares the same reality: its fixture is a REAL
+pending order (1 more order, 1 more unit of stock per run, same accepted
+dev litter as above), and its subject is a REAL processor session — **one
+card order on the payment processor's SANDBOX per run**, plus the engine's
+own payment-intent row for it. The sandbox order is never paid; it expires
+on the processor's side. No cleanup on either — the one rule.
+
+The contract's own replay semantics are what keep that footprint flat: the
+suite creates exactly ONE session, and every further session call — the
+replay test, the ignored-metadata test, the path/query test — returns the
+stored session without touching the processor, while the refusal probes are
+turned away before any lookup. The verify poll is the one exception in
+mechanics, not in cost: while the order is unsettled it DOES ask the
+processor for the order's live status — a read that creates nothing, so it
+still costs nothing new. No emails fire on any path this suite takes: a
+pending placement sends nothing, and a happy-path session/verify alerts
+nobody.
+
+File order is load-bearing: `payments` sorts after `orders`, so the stock
+arithmetic in `orders.test.ts` (above) sees the shelf before this file's
+1-unit drain. Money never moves, so the paid-side answers (`already_paid`,
+`{status: "paid"}`) are pinned as schemas only — see the file header.
 
 ## Adding endpoints
 

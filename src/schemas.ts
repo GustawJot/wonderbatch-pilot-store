@@ -345,6 +345,90 @@ export const orderResponseSchema = z
 	.strict();
 
 /**
+ * `POST /orders/:id/payment-session` — one shape, three states, discriminated
+ * by `state`. The per-state differences are contract, not accident:
+ *
+ *   - `created` — a fresh processor session: the store initialises the
+ *     processor's SDK with `client_token`, so both `processor` and
+ *     `client_token` must be present (a created session with no token is
+ *     unusable, and the schema says so).
+ *   - `replayed` — the stored session verbatim; `client_token`/`processor`
+ *     may be null (a method that never stored one / a session predating the
+ *     field).
+ *   - `already_paid` — `client_token` is REQUIRED null. This is the
+ *     wallet-guard pin: money is in flight or moved, and a finalised
+ *     processor token handed back here makes the SDK mint a duplicate,
+ *     untracked charge. A non-null token in this state is the regression
+ *     this schema exists to catch.
+ *
+ * `processor` is a CLOSED picklist — the engine speaks Revolut and PayU; any
+ * other value reaching the wire is drift, not a new processor.
+ */
+const paymentProcessorSchema = z.enum(['revolut', 'payu']);
+
+export const paymentSessionSchema = z.discriminatedUnion('state', [
+	z
+		.object({
+			state: z.literal('created'),
+			processor: paymentProcessorSchema,
+			processor_order_id: z.string().min(1),
+			client_token: z.string().min(1),
+		})
+		.strict(),
+	z
+		.object({
+			state: z.literal('replayed'),
+			processor: paymentProcessorSchema.nullable(),
+			processor_order_id: z.string().min(1),
+			client_token: z.string().min(1).nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			state: z.literal('already_paid'),
+			processor: paymentProcessorSchema.nullable(),
+			processor_order_id: z.string().min(1),
+			client_token: z.null(),
+		})
+		.strict(),
+]);
+
+export const paymentSessionResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z.object({ payment_session: paymentSessionSchema }).strict(),
+	})
+	.strict();
+
+/**
+ * `POST /orders/:id/verify-payment`. `status` is the order's payment status
+ * AFTER the call — a CLOSED picklist restating API.md's list verbatim.
+ * `reconciled` says whether THIS call flipped it; the contract tells stores
+ * to poll on `status`, never on `reconciled`.
+ */
+export const verifyPaymentResponseSchema = z
+	.object({
+		success: z.literal(true),
+		data: z
+			.object({
+				status: z.enum([
+					'pending',
+					'processing',
+					'authorised',
+					'paid',
+					'declined',
+					'failed',
+					'cancelled',
+					'refunded',
+					'partially_refunded',
+				]),
+				reconciled: z.boolean(),
+			})
+			.strict(),
+	})
+	.strict();
+
+/**
  * The one error whose `details` is CONTRACT, not diagnostics: 409
  * `INSUFFICIENT_STOCK` promises `details.lines[]` naming each variant that
  * could not be reserved, so a store can render exactly which lines to trim.

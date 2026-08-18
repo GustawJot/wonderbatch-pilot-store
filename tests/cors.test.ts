@@ -90,6 +90,28 @@ test('a preflight on /orders/:id advertises the X-Order-Token header', async () 
 });
 
 /**
+ * The 3c-4b payment endpoints are cross-origin POSTs carrying X-Order-Token,
+ * so a browser preflights them before the real request ever leaves. A
+ * preflight that refused (or omitted the header from the allow list) would
+ * kill the payment handoff before the API saw a byte of it.
+ */
+test('a preflight on /orders/:id/payment-session advertises the X-Order-Token header', async () => {
+	const res = await api.preflight('/orders/665f1b2c3d4e5f6071828394/payment-session');
+
+	assert.equal(res.status, 204);
+	assert.equal(res.headers.get('access-control-allow-origin'), config.origin);
+	assert.match(res.headers.get('access-control-allow-headers') ?? '', /X-Order-Token/);
+});
+
+test('a preflight on /orders/:id/verify-payment advertises the X-Order-Token header', async () => {
+	const res = await api.preflight('/orders/665f1b2c3d4e5f6071828394/verify-payment');
+
+	assert.equal(res.status, 204);
+	assert.equal(res.headers.get('access-control-allow-origin'), config.origin);
+	assert.match(res.headers.get('access-control-allow-headers') ?? '', /X-Order-Token/);
+});
+
+/**
  * The load-bearing one, and the only assertion this suite cannot make locally.
  *
  * An unregistered origin should get a 204 with NO allow-origin header — the
