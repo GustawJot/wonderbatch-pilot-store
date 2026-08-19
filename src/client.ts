@@ -93,6 +93,27 @@ export interface PlaceOrderBody {
 }
 
 /**
+ * Body of `POST /orders/:id/payment-session`. Field names match the wire
+ * exactly, as everywhere.
+ *
+ * `redirect_url` is typed `unknown` on purpose — sending a non-string, a
+ * relative path or a hostile origin is exactly how the
+ * `REDIRECT_URL_NOT_ALLOWED` 400 is exercised (same convention as
+ * `PlaceOrderBody.discount_code`).
+ *
+ * `metadata` is NOT part of the contract. It exists here only so a test can
+ * send it and prove the API ignores it — the storefront door passes no
+ * client metadata through and decides the capture mode itself (unlike the
+ * marketplace's internal endpoint).
+ */
+export interface PaymentSessionBody {
+	payment_method: string;
+	redirect_url?: unknown;
+	payment_data?: unknown;
+	metadata?: unknown;
+}
+
+/**
  * Query of `GET /shipping/pickup-points`. Every field is optional HERE even
  * though `method_id` and `postal_code` are required on the wire — omitting
  * one is exactly how the validation tests exercise the 400s.
@@ -145,6 +166,23 @@ export interface ApiClient {
 	 * the missing-header 400, same convention as above.
 	 */
 	getOrder(
+		orderId: string,
+		orderToken: string | null,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
+	/**
+	 * `POST /orders/:id/payment-session`. No `Idempotency-Key` by contract —
+	 * idempotency is the engine's own intent machinery (a repeat call replays
+	 * the stored session). `orderToken: null` omits the header, as above.
+	 */
+	createPaymentSession(
+		orderId: string,
+		orderToken: string | null,
+		body: PaymentSessionBody,
+		options?: RequestOverrides,
+	): Promise<ApiResult>;
+	/** `POST /orders/:id/verify-payment`. No request body, by contract. */
+	verifyPayment(
 		orderId: string,
 		orderToken: string | null,
 		options?: RequestOverrides,
@@ -300,6 +338,23 @@ export function createClient(config: PilotConfig): ApiClient {
 		getOrder(orderId, orderToken, options = {}) {
 			return request(`/orders/${encodeURIComponent(orderId)}`, {
 				...options,
+				...(orderToken !== null ? { extraHeaders: { 'X-Order-Token': orderToken } } : {}),
+			});
+		},
+
+		createPaymentSession(orderId, orderToken, body, options = {}) {
+			return request(`/orders/${encodeURIComponent(orderId)}/payment-session`, {
+				...options,
+				method: 'POST',
+				body,
+				...(orderToken !== null ? { extraHeaders: { 'X-Order-Token': orderToken } } : {}),
+			});
+		},
+
+		verifyPayment(orderId, orderToken, options = {}) {
+			return request(`/orders/${encodeURIComponent(orderId)}/verify-payment`, {
+				...options,
+				method: 'POST',
 				...(orderToken !== null ? { extraHeaders: { 'X-Order-Token': orderToken } } : {}),
 			});
 		},

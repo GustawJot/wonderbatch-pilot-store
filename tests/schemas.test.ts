@@ -11,6 +11,9 @@ import {
 	pickupPointSchema,
 	orderSchema,
 	insufficientStockErrorSchema,
+	paymentSessionSchema,
+	paymentSessionResponseSchema,
+	verifyPaymentResponseSchema,
 } from '../src/schemas.ts';
 
 const validVariant = {
@@ -281,6 +284,98 @@ test('an order money block must carry all four fields — a net-only unit_price 
 test('an omitted paid_at fails validation — milestones are explicit null, never absent', () => {
 	const { paid_at, ...omitted } = validOrder;
 	assert.throws(() => orderSchema.parse(omitted));
+});
+
+const validCreatedSession = {
+	state: 'created',
+	processor: 'revolut',
+	processor_order_id: '649b6b0c-aabb-4c47-98c4-b71f2c0d5c0a',
+	client_token: 'tok_wZK5RiWKQzs0EJIvfSMTeENy',
+};
+
+test('a well-formed payment session validates in every state', () => {
+	assert.doesNotThrow(() => paymentSessionSchema.parse(validCreatedSession));
+	assert.doesNotThrow(() =>
+		paymentSessionSchema.parse({
+			...validCreatedSession,
+			state: 'replayed',
+			client_token: null,
+			processor: null,
+		}),
+	);
+	assert.doesNotThrow(() =>
+		paymentSessionSchema.parse({
+			...validCreatedSession,
+			state: 'already_paid',
+			client_token: null,
+		}),
+	);
+});
+
+test('a payment session with an UNEXPECTED field fails validation', () => {
+	assert.throws(() => paymentSessionSchema.parse({ ...validCreatedSession, checkout_url: 'x' }));
+});
+
+/**
+ * A REGRESSION GUARD, NOT A HYPOTHETICAL. `already_paid` means money is in
+ * flight or moved, and the contract makes `client_token` REQUIRED null
+ * there: a finalised processor token handed to the SDK mints a duplicate,
+ * untracked charge (the engine's recorded 2026-06 incident). If this ever
+ * fails against a real response, that is the stored token leaking into the
+ * paid state, not a schema to loosen.
+ */
+test('an already_paid session with a non-null client_token fails validation', () => {
+	assert.throws(() =>
+		paymentSessionSchema.parse({ ...validCreatedSession, state: 'already_paid' }),
+	);
+});
+
+test('a created session must be usable: a null client_token or processor fails validation', () => {
+	assert.throws(() => paymentSessionSchema.parse({ ...validCreatedSession, client_token: null }));
+	assert.throws(() => paymentSessionSchema.parse({ ...validCreatedSession, processor: null }));
+});
+
+test('a processor outside the revolut/payu picklist fails validation', () => {
+	assert.throws(() => paymentSessionSchema.parse({ ...validCreatedSession, processor: 'stripe' }));
+});
+
+test('the payment session response envelope validates', () => {
+	assert.doesNotThrow(() =>
+		paymentSessionResponseSchema.parse({
+			success: true,
+			data: { payment_session: validCreatedSession },
+		}),
+	);
+});
+
+test('the verify-payment response validates, and drift fails', () => {
+	assert.doesNotThrow(() =>
+		verifyPaymentResponseSchema.parse({
+			success: true,
+			data: { status: 'paid', reconciled: true },
+		}),
+	);
+	// A status outside API.md's picklist is drift, not a new state.
+	assert.throws(() =>
+		verifyPaymentResponseSchema.parse({
+			success: true,
+			data: { status: 'settled', reconciled: true },
+		}),
+	);
+	// `reconciled` is a boolean, never a truthy stand-in.
+	assert.throws(() =>
+		verifyPaymentResponseSchema.parse({
+			success: true,
+			data: { status: 'paid', reconciled: 1 },
+		}),
+	);
+	// Unknown keys fail — an additive change is still a contract change.
+	assert.throws(() =>
+		verifyPaymentResponseSchema.parse({
+			success: true,
+			data: { status: 'paid', reconciled: true, order: {} },
+		}),
+	);
 });
 
 test('the INSUFFICIENT_STOCK envelope validates, and a lineless details fails', () => {
