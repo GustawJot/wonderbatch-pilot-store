@@ -284,6 +284,47 @@ export const orderTotalsSchema = z
 	})
 	.strict();
 
+/**
+ * The buyer as submitted, handed back on every read (3d task 1).
+ *
+ * A store holds this in memory right after placement, but NOT on a return
+ * visit — a buyer arriving from their confirmation email carries only an
+ * order id and a token. `invoice` is null when none was requested, and either
+ * of its fields may be null on its own.
+ */
+export const orderBuyerSchema = z
+	.object({
+		first_name: z.string().min(1),
+		last_name: z.string().min(1),
+		email: z.string().min(1),
+		phone_prefix: z.string().min(1),
+		phone: z.string().min(1),
+		invoice: z
+			.object({
+				company_name: z.string().nullable(),
+				tax_id: z.string().nullable(),
+			})
+			.strict()
+			.nullable(),
+	})
+	.strict();
+
+/**
+ * COMPLETE OR NULL — the engine never serves a partial address. Only
+ * `apartment` is nullable inside it; `country` comes back normalised to
+ * uppercase whatever case was submitted.
+ */
+export const orderAddressSchema = z
+	.object({
+		street: z.string().min(1),
+		building: z.string().min(1),
+		apartment: z.string().nullable(),
+		city: z.string().min(1),
+		postal_code: z.string().min(1),
+		country: z.string().length(2),
+	})
+	.strict();
+
 /** Null until the shipment carries a tracking number — never omitted. */
 export const orderTrackingSchema = z
 	.object({
@@ -318,6 +359,7 @@ export const orderSchema = z
 		payment_status: z.string().min(1),
 		fulfilment_status: z.string().min(1),
 		delivery_status: z.string().min(1),
+		buyer: orderBuyerSchema,
 		/** An order cannot be empty — placement refuses an empty cart. */
 		items: z.array(orderItemSchema).min(1),
 		totals: orderTotalsSchema,
@@ -325,7 +367,13 @@ export const orderSchema = z
 		delivery: z
 			.object({
 				method_id: z.string().min(1),
+				/** Family: `locker` | `pickup_point` | `courier_standard`. */
+				method: z.string().min(1),
+				/** The brand the buyer sees — never the booking route. */
+				carrier_id: z.string().min(1),
 				collection_point_code: z.string().nullable(),
+				collection_point_name: z.string().nullable(),
+				address: orderAddressSchema.nullable(),
 			})
 			.strict(),
 		tracking: orderTrackingSchema.nullable(),

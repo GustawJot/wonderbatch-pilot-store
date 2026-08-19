@@ -226,6 +226,14 @@ const validOrder = {
 	payment_status: 'pending',
 	fulfilment_status: 'unfulfilled',
 	delivery_status: 'not_dispatched',
+	buyer: {
+		first_name: 'Anna',
+		last_name: 'Nowak',
+		email: 'anna@example.com',
+		phone_prefix: '+48',
+		phone: '600123123',
+		invoice: { company_name: 'ACME sp. z o.o.', tax_id: '5251234567' },
+	},
 	items: [
 		{
 			variant_id: '665f1a2b3c4d5e6f70818283',
@@ -246,7 +254,21 @@ const validOrder = {
 		currency: 'PLN',
 	},
 	shipping_fee: { net: '11.99', gross: '14.75', vat_rate: '0.23', currency: 'PLN' },
-	delivery: { method_id: 'inpost_locker_pl', collection_point_code: 'KRA01A' },
+	delivery: {
+		method_id: 'inpost_locker_pl',
+		method: 'locker',
+		carrier_id: 'inpost',
+		collection_point_code: 'KRA01A',
+		collection_point_name: 'Kraków, Prosta 1',
+		address: {
+			street: 'Prosta',
+			building: '1',
+			apartment: null,
+			city: 'Kraków',
+			postal_code: '30-001',
+			country: 'PL',
+		},
+	},
 	tracking: null,
 	buyer_reference: null,
 	created_at: '2026-08-18T10:15:00.000Z',
@@ -266,8 +288,28 @@ test('a well-formed order validates, tracking block included', () => {
 	);
 });
 
-test('an order with an UNEXPECTED field fails validation — a leaked buyer block would be caught here', () => {
-	assert.throws(() => orderSchema.parse({ ...validOrder, buyer: { email: 'a@b.co' } }));
+test('an order with an UNEXPECTED field fails validation — a leaked engine field is caught here', () => {
+	// `buyer` used to be the example here; 3d made it contract. `sales_channel`
+	// is the kind of thing that must never reach a store: engine routing data.
+	assert.throws(() => orderSchema.parse({ ...validOrder, sales_channel: 'hayb-store' }));
+});
+
+test('a PARTIAL delivery address fails validation — the engine serves complete-or-null', () => {
+	const { postal_code, ...partial } = validOrder.delivery.address;
+	assert.throws(() =>
+		orderSchema.parse({ ...validOrder, delivery: { ...validOrder.delivery, address: partial } }),
+	);
+});
+
+test('an address-less order validates — a locker order need not carry one', () => {
+	assert.doesNotThrow(() =>
+		orderSchema.parse({ ...validOrder, delivery: { ...validOrder.delivery, address: null } }),
+	);
+});
+
+test('an omitted buyer.invoice fails validation — nullable means explicit null, never absent', () => {
+	const { invoice, ...noInvoice } = validOrder.buyer;
+	assert.throws(() => orderSchema.parse({ ...validOrder, buyer: noInvoice }));
 });
 
 test('the marketplace order-number family fails validation — only the channel family belongs on this wire', () => {
