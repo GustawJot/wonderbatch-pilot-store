@@ -82,3 +82,67 @@ test('image_url is null on every product until 2a gives images a home', async ()
 		assert.equal(product.image_url, null, `${product.product_group_id} has an image_url`);
 	}
 });
+
+/**
+ * `product_type` is the CATEGORY key (`coffee-beans`, `drip-bags`, `filters`,
+ * `ceramics`, more later) and `product_family` groups categories for browsing
+ * (`coffee` or `accessories`). The schema pins the open type and the closed
+ * family; this pins the one fixture we know is beans, so a category rename
+ * shows up here by name rather than as a parse failure three files away.
+ *
+ * `hayb-brasil-espresso-espresso` is the live id. The contract's example says
+ * `hayb-brasil-espresso`; per its own "Examples" note, the live response wins.
+ */
+test('the known beans fixture is categorised coffee-beans in the coffee family', async () => {
+	const res = await api.getProduct('hayb-brasil-espresso-espresso');
+
+	assert.equal(res.status, 200);
+	const { product } = productDetailSchema.parse(res.body).data;
+	assert.equal(product.product_type, 'coffee-beans');
+	assert.equal(product.product_family, 'coffee');
+});
+
+test('every coffee-beans product belongs to the coffee family', async () => {
+	const list = productListSchema.parse((await api.listProducts()).body);
+	const beans = list.data.products.filter((p) => p.product_type === 'coffee-beans');
+
+	// The pilot channel sells beans today, so an empty set here means the
+	// catalog changed under us — the fix is a new known-beans fixture, not
+	// dropping the guard. A loop that can assert nothing is not an assertion.
+	assert.ok(beans.length > 0, 'no coffee-beans product to check');
+
+	for (const product of beans) {
+		assert.equal(
+			product.product_family,
+			'coffee',
+			`${product.product_group_id} is coffee-beans but not in the coffee family`,
+		);
+	}
+});
+
+/**
+ * THE INVARIANT THE CONTRACT STATES OUTRIGHT. `axis` is what the buyer picks
+ * between and `net_weight` is what ships; for a variant sold by weight they
+ * are the same number. The schema enforces this on every parse — this test is
+ * the readable statement of it, walked over the live catalog.
+ */
+test('on every weight variant, axis.value equals net_weight', async () => {
+	const list = productListSchema.parse((await api.listProducts()).body);
+	const weightVariants = list.data.products.flatMap((p) =>
+		p.variants.filter((v) => v.axis.kind === 'weight').map((v) => ({ product: p, variant: v })),
+	);
+
+	// Everything listed today is sold by weight, so an empty set here means the
+	// catalog changed under us, not that the invariant holds vacuously.
+	assert.ok(weightVariants.length > 0, 'no weight variant to check');
+
+	for (const { product, variant } of weightVariants) {
+		assert.equal(
+			variant.axis.value,
+			variant.net_weight,
+			`${product.product_group_id}/${variant.variant_id}: axis.value ${variant.axis.value} ≠ net_weight ${variant.net_weight}`,
+		);
+		assert.equal(variant.axis.unit, 'g');
+		assert.equal(variant.axis.label, `${variant.net_weight} g`);
+	}
+});

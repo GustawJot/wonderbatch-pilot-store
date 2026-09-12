@@ -14,10 +14,81 @@
 
 import { z } from 'zod';
 
+/**
+ * `axis` is what the buyer chooses between the variants of one product — a
+ * store renders its variant picker from it, not from `net_weight`. The shape
+ * is always `{ kind, value, label, unit }` and `kind` is a CLOSED vocabulary:
+ * a fifth kind reaching the wire is drift, not a new product line.
+ *
+ * Each kind pins its own `value` type and `unit` literal, so a loose
+ * `string | number` here would tolerate the contract rather than assert it.
+ */
+export const axisSchema = z
+	.discriminatedUnion('kind', [
+		/** Sold by weight (beans, cascara). Grams. */
+		z
+			.object({
+				kind: z.literal('weight'),
+				value: z.number().positive(),
+				label: z.string().min(1),
+				unit: z.literal('g'),
+			})
+			.strict(),
+		/** Sold by the piece (drip bags, filters). Whole pieces. */
+		z
+			.object({
+				kind: z.literal('count'),
+				value: z.number().int().positive(),
+				label: z.string().min(1),
+				unit: z.literal('pcs'),
+			})
+			.strict(),
+		/** One of a seller-defined list (a mug's colour). The seller's own text. */
+		z
+			.object({
+				kind: z.literal('option'),
+				value: z.string().min(1),
+				label: z.string().min(1),
+				unit: z.null(),
+			})
+			.strict(),
+		/** The product comes one way only. */
+		z
+			.object({
+				kind: z.literal('single'),
+				value: z.literal('default'),
+				label: z.literal('default'),
+				unit: z.null(),
+			})
+			.strict(),
+	])
+	/**
+	 * For the two numeric kinds `label` is the locale-neutral canonical form
+	 * (`250 g`, `10 pcs`) — a store translates the unit itself from `unit` and
+	 * `value`. For `option` it is the seller's text and for `single` a literal,
+	 * both pinned above.
+	 */
+	.superRefine((axis, ctx) => {
+		if (axis.kind !== 'weight' && axis.kind !== 'count') return;
+		const canonical = `${axis.value} ${axis.unit}`;
+		if (axis.label !== canonical) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['label'],
+				message: `axis.label must be the canonical "${canonical}", got "${axis.label}"`,
+			});
+		}
+	});
+
 export const wireVariantSchema = z
 	.object({
 		variant_id: z.string().min(1),
+		/**
+		 * The variant's SHIPPING weight in grams — present whatever `axis.kind`
+		 * is. A box of ten drip bags weighs what the box weighs, not ten.
+		 */
 		net_weight: z.number().positive(),
+		axis: axisSchema,
 		/** Net, fixed 2 decimals, as a string — never a float. */
 		net_price: z.string().regex(/^\d+\.\d{2}$/),
 		currency: z.string().length(3),
@@ -26,13 +97,38 @@ export const wireVariantSchema = z
 		availability: z.string().min(1),
 		is_purchasable: z.boolean(),
 	})
-	.strict();
+	.strict()
+	/**
+	 * THE INVARIANT THE CONTRACT STATES OUTRIGHT: on a `weight` variant
+	 * `net_weight` equals `axis.value`. Enforced here so every file that parses
+	 * a product list checks it, not only the catalog tests.
+	 */
+	.superRefine((variant, ctx) => {
+		if (variant.axis.kind === 'weight' && variant.axis.value !== variant.net_weight) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ['axis', 'value'],
+				message: `axis.value (${variant.axis.value}) must equal net_weight (${variant.net_weight}) on a weight variant`,
+			});
+		}
+	});
 
 export const wireProductSchema = z
 	.object({
 		product_group_id: z.string().min(1),
 		name: z.string().min(1),
-		product_type: z.string().nullable(),
+		/**
+		 * The product CATEGORY key, which decides the shape of `attributes`. The
+		 * vocabulary is OPEN — `coffee-beans`, `drip-bags`, `filters`,
+		 * `ceramics`, more later — so only the type is pinned. It is `null` only
+		 * on a card-less product, an anomaly this suite refuses rather than
+		 * tolerates. The retired bare-family value `coffee` must never reappear.
+		 */
+		product_type: z.string().min(1).refine((v) => v !== 'coffee', {
+			message: 'product_type "coffee" was retired for the category key "coffee-beans"',
+		}),
+		/** Groups categories for browsing. CLOSED, and never null for the same reason. */
+		product_family: z.enum(['coffee', 'accessories']),
 		description: z.string().nullable(),
 		image_url: z.string().nullable(),
 		attributes: z.record(z.unknown()).nullable(),

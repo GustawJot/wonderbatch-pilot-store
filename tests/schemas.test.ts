@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+	axisSchema,
 	wireVariantSchema,
 	wireProductSchema,
 	errorSchema,
@@ -16,15 +17,30 @@ import {
 	verifyPaymentResponseSchema,
 } from '../src/schemas.ts';
 
+const weightAxis = { kind: 'weight', value: 250, label: '250 g', unit: 'g' };
+
 const validVariant = {
 	variant_id: '507f1f77bcf86cd799439011',
 	net_weight: 250,
+	axis: weightAxis,
 	net_price: '39.90',
 	currency: 'PLN',
 	sku: null,
 	ean: null,
 	availability: 'in_stock',
 	is_purchasable: true,
+};
+
+/** The live `hayb-brasil-espresso-espresso`, trimmed. Beans, sold by weight. */
+const validProduct = {
+	product_group_id: 'hayb-brasil-espresso-espresso',
+	name: 'Brasil Espresso',
+	product_type: 'coffee-beans',
+	product_family: 'coffee',
+	description: null,
+	image_url: null,
+	attributes: { brewing_method: 'espresso', is_decaf: false },
+	variants: [validVariant],
 };
 
 test('a well-formed variant validates', () => {
@@ -45,16 +61,141 @@ test('net_price must be a fixed-2-decimal string, not a number', () => {
 	assert.throws(() => wireVariantSchema.parse({ ...validVariant, net_price: '39.9' }));
 });
 
+test('a well-formed product validates', () => {
+	assert.doesNotThrow(() => wireProductSchema.parse(validProduct));
+});
+
 test('a product needs at least one variant', () => {
+	// `variants: []` is the ONLY defect here — every other field is the valid
+	// fixture, so this cannot go green for some unrelated reason.
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, variants: [] }));
+});
+
+/**
+ * `product_type` is the product CATEGORY key. The vocabulary is open —
+ * `coffee-beans`, `drip-bags`, `filters`, `ceramics`, more later — so the
+ * schema pins the type, not the list. It is `null` only on a card-less
+ * product, which is an anomaly rather than a state this suite accepts.
+ */
+test('product_type is a non-empty string from an open vocabulary, never null', () => {
+	assert.doesNotThrow(() => wireProductSchema.parse({ ...validProduct, product_type: 'drip-bags' }));
+	assert.doesNotThrow(() => wireProductSchema.parse({ ...validProduct, product_type: 'ceramics' }));
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, product_type: null }));
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, product_type: '' }));
+	const { product_type, ...omitted } = validProduct;
+	assert.throws(() => wireProductSchema.parse(omitted));
+});
+
+/**
+ * A REGRESSION GUARD, NOT A HYPOTHETICAL. `product_type` used to answer the
+ * bare family name `coffee`; it now answers the category key (`coffee-beans`
+ * for everything that exists today). The old value must not reappear.
+ */
+test('the retired product_type "coffee" fails validation', () => {
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, product_type: 'coffee' }));
+});
+
+test('product_family is the closed coffee/accessories vocabulary, never null', () => {
+	assert.doesNotThrow(() => wireProductSchema.parse({ ...validProduct, product_family: 'accessories' }));
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, product_family: 'beans' }));
+	assert.throws(() => wireProductSchema.parse({ ...validProduct, product_family: null }));
+	const { product_family, ...omitted } = validProduct;
+	assert.throws(() => wireProductSchema.parse(omitted));
+});
+
+// ---- axis -----------------------------------------------------------------
+
+const countAxis = { kind: 'count', value: 10, label: '10 pcs', unit: 'pcs' };
+const optionAxis = { kind: 'option', value: 'Biały', label: 'Biały', unit: null };
+const singleAxis = { kind: 'single', value: 'default', label: 'default', unit: null };
+
+test('every axis kind validates in its contract shape', () => {
+	assert.doesNotThrow(() => axisSchema.parse(weightAxis));
+	assert.doesNotThrow(() => axisSchema.parse(countAxis));
+	assert.doesNotThrow(() => axisSchema.parse(optionAxis));
+	assert.doesNotThrow(() => axisSchema.parse(singleAxis));
+});
+
+test('a variant carries any of the four axis kinds beside its shipping weight', () => {
+	// `net_weight` is the SHIPPING weight and stays present whatever the kind —
+	// a box of ten drip bags weighs what the box weighs, not ten.
+	assert.doesNotThrow(() => wireVariantSchema.parse({ ...validVariant, net_weight: 120, axis: countAxis }));
+	assert.doesNotThrow(() => wireVariantSchema.parse({ ...validVariant, net_weight: 380, axis: optionAxis }));
+	assert.doesNotThrow(() => wireVariantSchema.parse({ ...validVariant, net_weight: 45, axis: singleAxis }));
+});
+
+test('axis.kind is a closed vocabulary — an unknown kind fails validation', () => {
+	assert.throws(() => axisSchema.parse({ ...weightAxis, kind: 'volume' }));
+	assert.throws(() => axisSchema.parse({ ...weightAxis, kind: 'Weight' }));
+});
+
+test('a missing or null axis fails validation', () => {
+	const { axis, ...withoutAxis } = validVariant;
+	assert.throws(() => wireVariantSchema.parse(withoutAxis));
+	assert.throws(() => wireVariantSchema.parse({ ...validVariant, axis: null }));
+});
+
+test('an UNEXPECTED field inside axis fails validation', () => {
+	assert.throws(() => axisSchema.parse({ ...weightAxis, display: '250 g' }));
+});
+
+test('a weight axis is a number of grams with unit "g"', () => {
+	assert.throws(() => axisSchema.parse({ ...weightAxis, unit: 'pcs' }));
+	assert.throws(() => axisSchema.parse({ ...weightAxis, unit: null }));
+	assert.throws(() => axisSchema.parse({ ...weightAxis, value: '250' }));
+	assert.throws(() => axisSchema.parse({ ...weightAxis, value: 0 }));
+});
+
+test('a count axis is a whole number of pieces with unit "pcs"', () => {
+	assert.throws(() => axisSchema.parse({ ...countAxis, unit: 'g' }));
+	assert.throws(() => axisSchema.parse({ ...countAxis, unit: null }));
+	assert.throws(() => axisSchema.parse({ ...countAxis, value: '10' }));
+	assert.throws(() => axisSchema.parse({ ...countAxis, value: 2.5, label: '2.5 pcs' }));
+	assert.throws(() => axisSchema.parse({ ...countAxis, value: 0, label: '0 pcs' }));
+});
+
+test('an option axis is the seller\'s own text with unit null', () => {
+	assert.throws(() => axisSchema.parse({ ...optionAxis, unit: 'g' }));
+	assert.throws(() => axisSchema.parse({ ...optionAxis, value: 1 }));
+	assert.throws(() => axisSchema.parse({ ...optionAxis, value: '' }));
+});
+
+test('a single axis is exactly value/label "default" with unit null', () => {
+	assert.throws(() => axisSchema.parse({ ...singleAxis, unit: 'g' }));
+	assert.throws(() => axisSchema.parse({ ...singleAxis, value: 'standard' }));
+	assert.throws(() => axisSchema.parse({ ...singleAxis, label: 'Default' }));
+});
+
+/**
+ * `label` is locale-neutral and canonical for the two numeric kinds —
+ * `250 g`, `10 pcs` — so a store can translate the unit itself from `unit`
+ * and `value`. Any other spelling is drift, not a display choice.
+ */
+test('weight and count labels are the canonical "<value> <unit>" form', () => {
+	assert.throws(() => axisSchema.parse({ ...weightAxis, label: '250g' }));
+	assert.throws(() => axisSchema.parse({ ...weightAxis, label: '0.25 kg' }));
+	assert.throws(() => axisSchema.parse({ ...countAxis, label: '10 pieces' }));
+	assert.doesNotThrow(() => axisSchema.parse({ ...weightAxis, value: 1000, label: '1000 g' }));
+});
+
+/**
+ * THE INVARIANT THE CONTRACT STATES OUTRIGHT: for a `weight` variant,
+ * `net_weight` equals `axis.value`. It holds at the schema level so every
+ * file that parses a product list enforces it, not only the catalog tests.
+ */
+test('a weight variant whose axis.value disagrees with net_weight fails validation', () => {
 	assert.throws(() =>
-		wireProductSchema.parse({
-			product_group_id: 'hayb-brasil-espresso',
-			name: 'Brasil Espresso',
-			product_type: null,
-			description: null,
-			image_url: null,
-			attributes: null,
-			variants: [],
+		wireVariantSchema.parse({
+			...validVariant,
+			net_weight: 250,
+			axis: { kind: 'weight', value: 1000, label: '1000 g', unit: 'g' },
+		}),
+	);
+	assert.throws(() =>
+		wireVariantSchema.parse({
+			...validVariant,
+			net_weight: 1000,
+			axis: { kind: 'weight', value: 250, label: '250 g', unit: 'g' },
 		}),
 	);
 });
